@@ -1,0 +1,229 @@
+---
+title: "R Notebook"
+output: html_notebook
+---
+
+This is an [R Markdown](http://rmarkdown.rstudio.com) Notebook. When you execute code within the notebook, the results appear beneath the code. 
+
+Dataset analyzed can be found here: https://www.kaggle.com/datasets/aiolapo/jaundice-image-data 
+
+
+Data Question:
+
+Getting the Libraries
+```{r}
+library(dplyr)
+install.packages("tensorflow")
+library(tensorflow)
+install.packages("keras3")
+library(keras3)
+library(tfdatasets)
+install.packages("jpeg")
+library(jpeg)
+install.packages("magrittr")
+library(magrittr)
+install.packages("imager")
+library(imager)
+install.packages("ggplot2")
+library(ggplot2)
+install.packages("rsample")
+library(rsample)
+install.packages("BiocManager")
+BiocManager::install("EBImage")
+library(EBImage)
+```
+
+Loading Data
+```{r}
+unzip("~/Desktop/archive.zip", exdir = "~/Desktop/jaundice_data")
+
+# Showcases that there are two sub folders 
+list.files("~/Desktop/jaundice_data")
+
+
+# Storing the jaundice file information 
+jaundice_files <-list.files(
+  "~/Desktop/jaundice_data/jaundice",
+  pattern = "\\.jpg$",
+  full.names = TRUE
+)
+
+# Storing the normal file information 
+normal_files <- list.files(
+  "~/Desktop/jaundice_data/normal",
+  pattern = "\\.jpg$",
+  full.names = TRUE
+)
+```
+
+Data Processing
+
+About the Data:
+```{r}
+
+#Getting basic information about the data
+
+#getting image to ensure Data was properly loaded 
+library(jpeg)
+jaundice_path <- "~/Desktop/jaundice_data/jaundice"
+img <- readJPEG(files[1])
+plot(as.raster(img))
+
+# Checking size
+length(jaundice_files) # Result: 200
+length(normal_files) # Result: 560
+#There is an unproportional amount of Jaundice images compared to Normal which can result in a biased model
+# To fix the issue, augmenting number of Jaundice images; Simply duplicating them will not help model, as the model will run through the same images two times, so slightly changing each image, by mirroring it.
+for (x in jaundice_files){
+img <- readJPEG(x)  
+img_flip <- img[, rev(1:ncol(img)), ]
+new_file_flip <- file.path(jaundice_path, paste0(tools::file_path_sans_ext(basename(x)), "_flip.jpg"))
+writeJPEG(img_flip, new_file_flip)
+}
+
+#Re-reading to account for augmentation
+jaundice_files <- list.files(jaundice_path, pattern = "\\.jpg$", full.names = TRUE)
+length(jaundice_files)  #Result: 400
+
+#Check image size of all images to ensure they are same. Important as it helps reduce variability
+# All images seem to be 100 x 100 
+
+for (x in jaundice_files){
+ img <- readJPEG(x)
+ dim(img)
+  print( dim(img))
+}
+for (x in normal_files){
+ img <- readJPEG(x)
+ dim(img)
+  print( dim(img))
+}
+
+jaundice_files <- lapply(jaundice_files, function(f) {
+  img <- readImage(f)
+  resize(img, w = 256, h = 256)
+})
+
+# Resize Normal
+normal_files <- lapply(normal_files, function(f) {
+  img <- readImage(f)
+  resize(img, w = 256, h = 256)
+})
+```
+
+
+Exploratory Data Analysis: 
+```{r}
+library(ggplot2)
+library(jpeg)
+
+# Graphing mean brightness to ensure there is an even amount of lighting
+#Both seem to be normally distributed with mean around 0.55 and a few outliers at maen brightness of 0.7; Since both spreads are vry similar, no extra change needs to be made to adjust brightness
+jaundice_brightness <- sapply(jaundice_files, function(f) mean(readJPEG(f)))
+normal_brightness  <- sapply(normal_files,  function(f) mean(readJPEG(f)))
+ggplot() +
+  geom_histogram(data = data.frame(brightness = normal_brightness), 
+                 aes(x = brightness), fill = "skyblue", alpha = 0.6, bins = 30) +
+  geom_histogram(data = data.frame(brightness = jaundice_brightness), 
+                 aes(x = brightness), fill = "pink", alpha = 0.6, bins = 30) +
+  labs(title = "Image Brightness Distribution", x = "Mean brightness", y = "Number of images") +
+  theme_minimal()
+```
+
+
+Train/Test Split
+```{r}
+set.seed(500)
+
+jaundice_files <- data.frame(file = jaundice_files)
+normal_files  <- data.frame(file = normal_files)
+
+# 80% for training and 20% for testing --> standard 
+jaundice_split <- initial_split(jaundice_files, prop = 0.80)
+jaundice_train <- training(jaundice_split)
+jaundice_test <- testing(jaundice_split)
+
+normal_split <- initial_split(normal_files, prop = 0.80)
+normal_train <- training(normal_split)
+normal_test <- testing(normal_split)
+
+
+#Combine the individual train/test splits of normal and jaundice files into one 
+# Adding an element of binary classification by labeling jaundice as 1 and normal as 0
+train_df <- bind_rows(
+  mutate(jaundice_train, class = 1),
+  mutate(normal_train, class = 0)
+)
+
+test_df <- bind_rows(
+  mutate(jaundice_test, class = 1),
+  mutate(normal_test, class = 0)
+)
+
+#Shuffling data
+train_df <- train_df[sample(nrow(train_df)), ]
+test_df  <- test_df[sample(nrow(test_df)), ]
+```
+
+
+Image Pre-processing  
+```{r}
+library(EBImage)
+
+train_images <- lapply(train_df$file, readImage)
+test_images <- lapply(test_df$file, readImage)
+
+train_array <- simplify2array(train_images)
+test_array  <- simplify2array(test_images)
+
+dim(train_array)
+dim(test_array)
+
+
+#nrow(train_df)
+
+#pic <- paste0('jaundice (', 1:nrow(train_df), ').jpg')
+
+#images <- list()
+
+#for (i in 1:length(pic)) {
+ # images[[i]] <- readImage(pic[i])}
+
+#length(train_df)
+#length(images)
+
+
+
+
+#pic <- paste0('jaundice (', 1:100, '). jpg')
+
+#train_array <- list()
+#test_array <- list()
+#for(i in 1: length(train_df)){
+  #train_array[[i]] <- readImage(train_df[i])}
+
+#for(i in 1: length(test_df)){
+ # test_array[[i]] <- readJPG(test_df[i])}
+
+
+# Convert images to Arrays
+```
+
+
+Model
+```{r}
+#Create CNN
+
+```
+
+
+Hyper-parameter Tuning
+```{r}
+```
+
+
+Results
+```{r}
+```
+
+
