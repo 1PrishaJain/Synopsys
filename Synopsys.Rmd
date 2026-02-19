@@ -12,25 +12,7 @@ Data Question:
 
 Getting the Libraries
 ```{r}
-library(dplyr)
-install.packages("tensorflow")
-library(tensorflow)
-install.packages("keras3")
-library(keras3)
 library(tfdatasets)
-install.packages("jpeg")
-library(jpeg)
-install.packages("magrittr")
-library(magrittr)
-install.packages("imager")
-library(imager)
-install.packages("ggplot2")
-library(ggplot2)
-install.packages("rsample")
-library(rsample)
-install.packages("BiocManager")
-BiocManager::install("EBImage")
-library(EBImage)
 ```
 
 Loading Data
@@ -66,8 +48,7 @@ About the Data:
 #getting image to ensure Data was properly loaded 
 library(jpeg)
 jaundice_path <- "~/Desktop/jaundice_data/jaundice"
-img <- readJPEG(files[1])
-plot(as.raster(img))
+
 
 # Checking size
 length(jaundice_files) # Result: 200
@@ -91,24 +72,14 @@ length(jaundice_files)  #Result: 400
 for (x in jaundice_files){
  img <- readJPEG(x)
  dim(img)
-  print( dim(img))
+#  print( dim(img))
 }
 for (x in normal_files){
  img <- readJPEG(x)
  dim(img)
-  print( dim(img))
+ # print( dim(img))
 }
 
-jaundice_files <- lapply(jaundice_files, function(f) {
-  img <- readImage(f)
-  resize(img, w = 256, h = 256)
-})
-
-# Resize Normal
-normal_files <- lapply(normal_files, function(f) {
-  img <- readImage(f)
-  resize(img, w = 256, h = 256)
-})
 ```
 
 
@@ -119,8 +90,20 @@ library(jpeg)
 
 # Graphing mean brightness to ensure there is an even amount of lighting
 #Both seem to be normally distributed with mean around 0.55 and a few outliers at maen brightness of 0.7; Since both spreads are vry similar, no extra change needs to be made to adjust brightness
-jaundice_brightness <- sapply(jaundice_files, function(f) mean(readJPEG(f)))
-normal_brightness  <- sapply(normal_files,  function(f) mean(readJPEG(f)))
+jaundice_brightness <- sapply(jaundice_files, function(f) {
+  img <- readJPEG(f)
+  mean(img)
+})
+
+normal_brightness <- sapply(normal_files, function(f) {
+  img <- readJPEG(f)
+  mean(img)
+})
+
+
+
+
+
 ggplot() +
   geom_histogram(data = data.frame(brightness = normal_brightness), 
                  aes(x = brightness), fill = "skyblue", alpha = 0.6, bins = 30) +
@@ -133,10 +116,15 @@ ggplot() +
 
 Train/Test Split
 ```{r}
+
+
+library(rsample)
+library(dplyr)
+
 set.seed(500)
 
 jaundice_files <- data.frame(file = jaundice_files)
-normal_files  <- data.frame(file = normal_files)
+normal_files   <- data.frame(file = normal_files)
 
 # 80% for training and 20% for testing --> standard 
 jaundice_split <- initial_split(jaundice_files, prop = 0.80)
@@ -163,15 +151,31 @@ test_df <- bind_rows(
 #Shuffling data
 train_df <- train_df[sample(nrow(train_df)), ]
 test_df  <- test_df[sample(nrow(test_df)), ]
+
+dim(train_df)
+dim(test_df)
 ```
 
 
 Image Pre-processing  
 ```{r}
+
 library(EBImage)
 
-train_images <- lapply(train_df$file, readImage)
-test_images <- lapply(test_df$file, readImage)
+
+
+train_images <- lapply(train_df$file, function(f) {
+  img <- readImage(f)
+  img <- resize(img, w = 256, h = 256)
+  
+})
+
+test_images <- lapply(test_df$file, function(f) {
+  img <- readImage(f)
+  img <- resize(img, w = 256, h = 256)
+})
+
+
 
 train_array <- simplify2array(train_images)
 test_array  <- simplify2array(test_images)
@@ -179,51 +183,190 @@ test_array  <- simplify2array(test_images)
 dim(train_array)
 dim(test_array)
 
+train_array <- aperm(train_array, c(4, 1, 2, 3))
+test_array <- aperm(test_array, c(4, 1, 2, 3))
 
-#nrow(train_df)
-
-#pic <- paste0('jaundice (', 1:nrow(train_df), ').jpg')
-
-#images <- list()
-
-#for (i in 1:length(pic)) {
- # images[[i]] <- readImage(pic[i])}
-
-#length(train_df)
-#length(images)
-
-
-
-
-#pic <- paste0('jaundice (', 1:100, '). jpg')
-
-#train_array <- list()
-#test_array <- list()
-#for(i in 1: length(train_df)){
-  #train_array[[i]] <- readImage(train_df[i])}
-
-#for(i in 1: length(test_df)){
- # test_array[[i]] <- readJPG(test_df[i])}
-
-
-# Convert images to Arrays
 ```
 
 
 Model
 ```{r}
 #Create CNN
+install.packages("magrittr")
+library(magrittr)
+install.packages("keras3")
+library(keras3)
 
+
+# Creating a hardcoded model showed that training accuracy was always 1 and the loss was decreasing susbstantially. However, the val accuracy was around 0.88 and the val loss also wavered from anywhere between 0.31 - 0.34
+# In general, it took around 4 seconds and 95 ms to get each epoch
+
+#model <- keras_model_sequential() %>% 
+ # layer_conv_2d(
+   # filters = 32,
+  #  kernel_size = 3,
+  #  activation = "relu",
+   # input_shape = c(256, 256, 3)
+#  ) %>%
+ # layer_max_pooling_2d(pool_size = 2) %>%
+#  layer_flatten() %>%
+ # layer_dense(
+  #  units = 1,
+   # activation = "sigmoid"
+ # )
+
+
+#Compiling Step
+#compile(model,
+   #     optimizer = "adam",
+     #   loss = "binary_crossentropy",
+       # metrics = "accuracy"
+#)
+#summary(model)
+
+result <- fit( 
+  model, 
+  x = train_array, 
+  y = train_df$class, #if it doesn't work then train_df$label
+  batch_size = 32, 
+  epochs = ncol(train_array)/32, 
+  validation_split = 0.2
+) 
+evaluate(model,train_array, train_df$class)
+plot(result)
 ```
 
 
 Hyper-parameter Tuning
 ```{r}
+#Hyper-parameter Tuning 
+build_model <- function(filters = 32, dropout_rate = 0.3, lr = 0.001) {
+  model <- keras_model_sequential() %>%
+    layer_conv_2d(filters = filters, kernel_size = 3, activation = "relu", input_shape = c(256,256,3)) %>%
+    layer_max_pooling_2d(pool_size = 2) %>%
+    layer_flatten() %>%
+    layer_dropout(rate = dropout_rate) %>%
+    layer_dense(units = 1, activation = "sigmoid")
+  
+  compile(model, optimizer = optimizer_adam(learning_rate = lr),
+          loss = "binary_crossentropy",
+          metrics = c("accuracy"))
+  
+  return(model)
+}
+
+# In the run beforehand, noticed that training accuracy always 1(meaning overfitting) so trying to change that by altering dropout_rate
+# Change: Dropout rate bigger
+# doing this the accuracy is now growing instead of constantly being 1
+model_1 <- build_model(filters = 32,dropout_rate = 0.5, lr = 0.001 )
+result <- fit( 
+  model_1, 
+  x = train_array, 
+  y = train_df$class, #if it doesn't work then train_df$label
+  batch_size = 32, 
+  epochs = ncol(train_array)/32, 
+  validation_split = 0.2
+) 
+plot(result)
+
+#This model improved our validation_accuracy and has much lower val_loss but the accuracy is still constantly 1
+#MAYBE
+model_2 <- build_model(filters = 32,dropout_rate = 0.1, lr = 0.001 )
+result <- fit( 
+  model_2, 
+  x = train_array, 
+  y = train_df$class, #if it doesn't work then train_df$label
+  batch_size = 32, 
+  epochs = ncol(train_array)/32, 
+  validation_split = 0.2
+) 
+plot(result)
+
+# This model improved our validation_accuracy and has much lower val_loss + the accuracy also gradually increased
+#YES
+model_3 <- build_model(filters = 32,dropout_rate = 0.2, lr = 0.001 )
+result <- fit( 
+  model_3, 
+  x = train_array, 
+  y = train_df$class, #if it doesn't work then train_df$label
+  batch_size = 32, 
+  epochs = ncol(train_array)/32, 
+  validation_split = 0.2
+) 
+plot(result)
+
+
+# This model was much slower (averaging at 7 seconds in comparison to others) & the val_loss is higher; However, the loss is lower and the val_accuracy is still high
+#Maybe
+model_4 <- build_model(filters = 64,dropout_rate = 0.2, lr = 0.001 )
+result <- fit( 
+  model_4, 
+  x = train_array, 
+  y = train_df$class, #if it doesn't work then train_df$label
+  batch_size = 32, 
+  epochs = ncol(train_array)/32, 
+  validation_split = 0.2
+) 
+plot(result)
+
+#RStudios crashed --> don't do
+#NO
+model_5 <- build_model(filters = 16,dropout_rate = 0.2, lr = 0.001 )
+result <- fit( 
+  model_5, 
+  x = train_array, 
+  y = train_df$class, #if it doesn't work then train_df$label
+  batch_size = 32, 
+  epochs = ncol(train_array)/32, 
+  validation_split = 0.2
+) 
+plot(result)
+
+#Loss decreases substantially + val_loss is lower; However, accuracy is constantly 1 for the last few
+#Maybe
+model_6 <- build_model(filters = 48,dropout_rate = 0.2, lr = 0.001 )
+result <- fit( 
+  model_6, 
+  x = train_array, 
+  y = train_df$class, #if it doesn't work then train_df$label
+  batch_size = 32, 
+  epochs = ncol(train_array)/32, 
+  validation_split = 0.2
+) 
+plot(result)
+
+# Loss is too high and accuracy is not high enough + taking lot of time
+#NO
+model_7 <- build_model(filters = 48,dropout_rate = 0.2, lr = 0.5 )
+result <- fit( 
+  model_7, 
+  x = train_array, 
+  y = train_df$class, #if it doesn't work then train_df$label
+  batch_size = 32, 
+  epochs = ncol(train_array)/32, 
+  validation_split = 0.2
+) 
+
+plot(result)
+
+# loss is too high and time is too much 
+#NO 
+model_8 <- build_model(filters = 48,dropout_rate = 0.2, lr = 0.0001 )
+result <- fit( 
+  model_8, 
+  x = train_array, 
+  y = train_df$class, #if it doesn't work then train_df$label
+  batch_size = 32, 
+  epochs = ncol(train_array)/32, 
+  validation_split = 0.2
+) 
+plot(result)
 ```
 
 
 Results
 ```{r}
+
 ```
 
 
